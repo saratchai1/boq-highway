@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createInitialSection, type PavementLayer, type StationRange } from './models'
-import { calculateQuantityProvenance } from './quantity'
+import { calculateProjectQuantityProvenance, calculateQuantityProvenance } from './quantity'
 
 const layer: PavementLayer = {
   id: 'test-layer',
@@ -20,7 +20,6 @@ describe('calculateQuantityProvenance', () => {
     const section = createInitialSection()
     const result = calculateQuantityProvenance(section, ranges, [layer])[0]
 
-    // Default paved width = 2 × (3.5 + 3.5 + 2.5) = 19.0 m.
     expect(result.contributions).toHaveLength(2)
     expect(result.contributions[0].quantity).toBeCloseTo(1900, 8)
     expect(result.contributions[1].quantity).toBeCloseTo(950, 8)
@@ -37,7 +36,21 @@ describe('calculateQuantityProvenance', () => {
       { ...layer, unit: 'm²', thickness: 0 },
     ])[0]
 
-    // left 9.5 m + right 4.75 m = 14.25 m; × 100 m = 1,425 m².
     expect(result.quantity).toBeCloseTo(1425, 8)
+  })
+
+  it('integrates linear widening with average effective width', () => {
+    const section = createInitialSection()
+    const result = calculateProjectQuantityProvenance(
+      [section],
+      [{ id: 'r', start: 0, end: 100, sectionId: section.id }],
+      [{ ...layer, unit: 'm²', thickness: 0 }],
+      [{ id: 'w', start: 0, end: 100, side: 'both', from: 0, to: 1 }],
+    )[0]
+
+    // Base width 19 m. Both sides widen 0 -> 1 m, average total extra width = 1 m.
+    // Average paved width 20 m × 100 m = 2,000 m².
+    expect(result.quantity).toBeCloseTo(2000, 8)
+    expect(result.contributions[0].pavedWidth).toBeCloseTo(20, 8)
   })
 })
