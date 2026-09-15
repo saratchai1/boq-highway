@@ -1,30 +1,41 @@
-# BOQ Highway
+# boq-highway
 
-Prototype web application for highway quantity takeoff and typical cross-section configuration.
+Model-driven highway BOQ prototype based on the supplied reference workflow.
 
-## Current MVP
+## What changed from the visual clone
 
-- Highway BOQ dashboard inspired by the supplied reference screens
-- Typical Cross Section editor with lane widths, median, shoulders, ROW and side slope
-- DOH standard drawing references and concrete barrier settings
-- Superelevation policy fields
-- Live SVG cross-section preview
-- Editable STA ranges
-- Derived pavement quantities for the configured station length
-- Responsive desktop modal workflow matching the reference layout closely
+The app is now separated into explicit engineering layers instead of keeping UI state, geometry and quantity formulas inside one React component:
 
-## Run locally
+- `src/domain/models.ts` — canonical cross-section, station and pavement models
+- `src/domain/geometry.ts` — derives section geometry from left/right components
+- `src/domain/stations.ts` — detects STA gaps, overlaps and invalid ranges
+- `src/domain/quantity.ts` — calculates quantities with per-range provenance
+- `src/domain/*.test.ts` — engineering-rule regression tests
+- `src/App.tsx` — UI only orchestrates/edit/displays those models
+
+## Key behavior
+
+- Left/right cross-sections can be symmetric or independently modeled.
+- The SVG section is generated from component widths rather than fixed decorative rectangles.
+- Station coverage is derived; the UI will not hard-code a “continuous” status.
+- Every pavement quantity keeps the STA ranges, effective width, formula and contribution that produced it.
+- CI runs typecheck, engineering unit tests and production build.
+
+## Validation boundary
+
+This branch is still an engineering draft. DOH standard dimensions, superelevation transition logic, authoritative pavement rules, unit rates and production estimating rules must be validated against the governing project/DOH documents before quantities are used commercially.
+
+## Run
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Validate
+## Verify
 
 ```bash
 npm run typecheck
+npm test
 npm run build
 ```
-
-The current quantity engine is an MVP. Before production estimating, project-specific DOH calculation rules, widening transitions, superelevation transitions, cut/fill and payment-item rules should be validated against authoritative standards and sample outputs.
