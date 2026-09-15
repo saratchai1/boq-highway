@@ -26,11 +26,11 @@ The app separates engineering rules from the React UI:
 8. Trace every BOQ quantity back to TCS, STA range, average effective width and formula.
 9. Compare quantities with/without widening to expose design impact.
 
-The default demo now covers STA 31+500 to 41+150 continuously using three TCS assignments, three widening transitions and three superelevation transitions.
+The default demo covers STA 31+500 to 41+150 continuously using three TCS assignments, three widening transitions and three superelevation transitions.
 
 ## Validation boundary
 
-This repository is a working engineering MVP, not an authoritative DOH estimating database. Before commercial or contractual use, verify standard drawing revisions, pavement rules, superelevation criteria, widening criteria, unit rates, Factor F and project-specific measurement/payment rules against the governing documents.
+The engineering MVP is functionally complete for the modeled workflow. It is not an authoritative DOH estimating database. Before commercial or contractual use, verify standard drawing revisions, pavement rules, superelevation criteria, widening criteria, unit rates, Factor F and project-specific measurement/payment rules against the governing documents.
 
 ## Run
 
