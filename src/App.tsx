@@ -1,101 +1,57 @@
 import { useMemo, useState } from 'react'
+import { deriveSectionGeometry, mirrorLeftToRight } from './domain/geometry'
+import {
+  createInitialRanges,
+  createInitialSection,
+  DEFAULT_LAYERS,
+  type CrossSectionModel,
+  type RoadSide,
+  type SideKey,
+  type StationRange,
+} from './domain/models'
+import { calculateQuantityProvenance } from './domain/quantity'
+import { analyzeStationCoverage, formatStation } from './domain/stations'
 
-type StationRange = { id: number; start: number; end: number }
-type Layer = { name: string; thickness: number; unit: 'm²' | 'm³'; color: string }
+const initialSection = createInitialSection()
 
-type CrossSectionState = {
-  name: string
-  median: number
-  insideShoulder: number
-  outsideShoulder: number
-  sidewalk: number
-  raisedMedian: number
-  sideSlope: number
-  row: number
-  rowSlope: number
-  lanes: number[]
-  medianType: string
-  structureMode: string
-  surfaceMode: string
-  symmetric: boolean
-  barrier: string
-  barrierHeight: number
-  barrierBase: number
-  superSource: string
-  pivot: string
-  slopeDirection: string
-  normalCrown: number
-}
-
-const initialSection: CrossSectionState = {
-  name: 'TCS-2',
-  median: 2.62,
-  insideShoulder: 0,
-  outsideShoulder: 2.5,
-  sidewalk: 0,
-  raisedMedian: 0,
-  sideSlope: 2,
-  row: 30,
-  rowSlope: 0,
-  lanes: [3.5, 3.5],
-  medianType: 'เกาะแบริเออร์ คสล. (GD-106)',
-  structureMode: 'ไม่มีเขตทาง — คันทาง + ลาดข้าง',
-  surfaceMode: 'ผิวจราจร + ไหล่ทาง (ค่าเดิม)',
-  symmetric: true,
-  barrier: 'RS-608 · แบริเออร์ คสล. Type I (หล่อในที่)',
-  barrierHeight: 0.81,
-  barrierBase: 0.6,
-  superSource: 'Curve Data ตาม Alignment (e / LT-RT / STA)',
-  pivot: 'PG.(LT.) / PG.(RT.) แยกอิสระ (ตามแบบ 15–18)',
-  slopeDirection: 'หมุนตามผิวจราจร',
-  normalCrown: 2.5,
-}
-
-const layers: Layer[] = [
-  { name: 'ผิว AC Wearing', thickness: 0.05, unit: 'm²', color: '#222a35' },
-  { name: 'AC Binder / Leveling', thickness: 0.05, unit: 'm³', color: '#667180' },
-  { name: 'AC Base', thickness: 0.08, unit: 'm³', color: '#3d4654' },
-  { name: 'พื้นทางเดิมซีเมนต์ (บด)', thickness: 0.15, unit: 'm³', color: '#f2a400' },
-  { name: 'พื้นทางเดิมซีเมนต์ (ล่าง)', thickness: 0.15, unit: 'm³', color: '#ed8d00' },
-  { name: 'รองพื้นทาง Subbase', thickness: 0.15, unit: 'm³', color: '#e2bd74' },
-  { name: 'วัสดุคัดเลือก ก', thickness: 0.2, unit: 'm³', color: '#c69a58' },
-]
-
-const formatStation = (value: number) => {
-  const km = Math.floor(value / 1000)
-  const m = value % 1000
-  return `${km}+${String(m.toFixed(3)).padStart(7, '0')}`
-}
-
-const Field = ({ label, value, suffix = 'ม.', onChange }: { label: string; value: number; suffix?: string; onChange: (value: number) => void }) => (
+const Field = ({
+  label,
+  value,
+  suffix = 'ม.',
+  onChange,
+}: {
+  label: string
+  value: number
+  suffix?: string
+  onChange: (value: number) => void
+}) => (
   <label className="form-row">
     <span>{label}</span>
     <div className="number-wrap">
-      <input type="number" step="0.01" value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <input type="number" step="0.01" value={value} onChange={(event) => onChange(Number(event.target.value))} />
       <small>{suffix}</small>
     </div>
   </label>
 )
 
-function CrossSectionGraphic({ section, compact = false }: { section: CrossSectionState; compact?: boolean }) {
-  const laneTotal = section.lanes.reduce((sum, lane) => sum + lane, 0)
-  const totalRoad = laneTotal * 2 + section.outsideShoulder * 2 + section.insideShoulder * 2 + section.median
-  const medianPx = Math.max(36, (section.median / totalRoad) * 820)
-  const carriagePx = Math.max(185, ((laneTotal + section.outsideShoulder + section.insideShoulder) / totalRoad) * 820)
+const segmentLabel = (kind: 'inside-shoulder' | 'lane' | 'outside-shoulder', laneIndex?: number) => {
+  if (kind === 'lane') return `เลน ${(laneIndex ?? 0) + 1}`
+  if (kind === 'inside-shoulder') return 'ไหล่ใน'
+  return 'ไหล่นอก'
+}
+
+function CrossSectionGraphic({ section, compact = false }: { section: CrossSectionModel; compact?: boolean }) {
+  const geometry = useMemo(() => deriveSectionGeometry(section), [section])
   const center = 500
-  const leftRoadStart = center - medianPx / 2 - carriagePx
-  const rightRoadStart = center + medianPx / 2
-  const lanePx = carriagePx * (laneTotal / (laneTotal + section.outsideShoulder + section.insideShoulder || 1))
-  const shoulderPx = carriagePx - lanePx
+  const drawingWidth = 780
+  const scale = drawingWidth / Math.max(geometry.totalWidth, 1)
+  const x = (metres: number) => center + metres * scale
+  const medianWidthPx = Math.max(8, section.median * scale)
 
   return (
     <div className={`section-graphic ${compact ? 'compact' : ''}`}>
-      <svg viewBox="0 0 1000 320" role="img" aria-label="Typical road cross section preview">
+      <svg viewBox="0 0 1000 320" role="img" aria-label="Parametric typical road cross section preview">
         <defs>
-          <pattern id="aggregate" width="12" height="12" patternUnits="userSpaceOnUse">
-            <circle cx="3" cy="3" r="1.4" fill="#b78845" />
-            <circle cx="9" cy="7" r="1.1" fill="#d0aa6b" />
-          </pattern>
           <pattern id="pavement" width="8" height="8" patternUnits="userSpaceOnUse">
             <path d="M0 8L8 0" stroke="#d27e00" strokeWidth="1" />
           </pattern>
@@ -106,78 +62,122 @@ function CrossSectionGraphic({ section, compact = false }: { section: CrossSecti
         <line x1="908" x2="908" y1="41" y2="56" className="dimension-line" />
         <text x="500" y="39" textAnchor="middle" className="dimension-text">เขต R.O.W. {section.row.toFixed(2)} ม.</text>
 
-        <line x1={leftRoadStart} x2={rightRoadStart + carriagePx} y1="78" y2="78" className="dimension-line" />
-        <text x="500" y="69" textAnchor="middle" className="dimension-text">เขตก่อสร้าง {totalRoad.toFixed(2)} ม.</text>
+        <line x1={x(geometry.leftEdge)} x2={x(geometry.rightEdge)} y1="78" y2="78" className="dimension-line" />
+        <text x="500" y="69" textAnchor="middle" className="dimension-text">เขตก่อสร้าง {geometry.totalWidth.toFixed(2)} ม.</text>
 
-        <polygon points={`${leftRoadStart - 92},224 ${leftRoadStart},174 ${rightRoadStart + carriagePx},174 ${rightRoadStart + carriagePx + 92},224`} fill="#e8c77f" opacity="0.88" />
-        <polygon points={`${leftRoadStart},174 ${leftRoadStart + shoulderPx},161 ${center - medianPx / 2},161 ${center - medianPx / 2},190 ${leftRoadStart},190`} fill="url(#pavement)" stroke="#bd7800" />
-        <polygon points={`${rightRoadStart},161 ${rightRoadStart + carriagePx - shoulderPx},161 ${rightRoadStart + carriagePx},174 ${rightRoadStart + carriagePx},190 ${rightRoadStart},190`} fill="url(#pavement)" stroke="#bd7800" />
-        <rect x={leftRoadStart + shoulderPx} y="151" width={Math.max(0, lanePx - 2)} height="39" fill="#cfd3d6" stroke="#8c959e" />
-        <rect x={rightRoadStart} y="151" width={Math.max(0, lanePx - 2)} height="39" fill="#cfd3d6" stroke="#8c959e" />
+        <polygon
+          points={`${x(geometry.leftEdge) - 82},224 ${x(geometry.leftEdge)},190 ${x(geometry.rightEdge)},190 ${x(geometry.rightEdge) + 82},224`}
+          fill="#e8c77f"
+          opacity="0.88"
+        />
 
-        {section.lanes.slice(0, -1).map((lane, index) => {
-          const before = section.lanes.slice(0, index + 1).reduce((sum, n) => sum + n, 0)
-          const ratio = before / laneTotal
-          const leftX = leftRoadStart + shoulderPx + lanePx * ratio
-          const rightX = rightRoadStart + lanePx * ratio
-          return <g key={`${lane}-${index}`}><line x1={leftX} x2={leftX} y1="151" y2="190" stroke="#a7adb3" strokeDasharray="5 4" /><line x1={rightX} x2={rightX} y1="151" y2="190" stroke="#a7adb3" strokeDasharray="5 4" /></g>
+        {geometry.segments.map((segment) => {
+          const segmentX = x(segment.start)
+          const width = Math.max(1, (segment.end - segment.start) * scale)
+          const isLane = segment.kind === 'lane'
+          const fill = isLane ? '#cfd3d6' : 'url(#pavement)'
+          return (
+            <g key={segment.id}>
+              <rect x={segmentX} y={isLane ? 151 : 161} width={width} height={isLane ? 39 : 29} fill={fill} stroke={isLane ? '#8c959e' : '#bd7800'} />
+              {!compact && width > 45 && (
+                <text x={segmentX + width / 2} y="145" textAnchor="middle" className="road-label">
+                  {segmentLabel(segment.kind, segment.laneIndex)} {segment.width.toFixed(2)}
+                </text>
+              )}
+            </g>
+          )
         })}
 
-        <rect x={center - medianPx / 2} y="151" width={medianPx} height="39" fill="#e7e2d6" stroke="#9e9686" />
+        <rect x={center - medianWidthPx / 2} y="151" width={medianWidthPx} height="39" fill="#e7e2d6" stroke="#9e9686" />
         <path d={`M ${center - 7} 151 L ${center - 5} 115 L ${center + 5} 115 L ${center + 7} 151 Z`} fill="#9da6ad" stroke="#65717b" />
         <line x1={center} x2={center} y1="115" y2="86" stroke="#616a72" strokeWidth="2" />
         <path d={`M ${center - 18} 89 Q ${center} 73 ${center + 18} 89`} fill="none" stroke="#d8ab00" strokeWidth="3" />
 
-        <text x={leftRoadStart + shoulderPx / 2} y="145" textAnchor="middle" className="road-label">งานขยาย</text>
-        <text x={leftRoadStart + shoulderPx + lanePx / 2} y="145" textAnchor="middle" className="road-label">ผิวจราจรเดิม</text>
-        <text x={rightRoadStart + lanePx / 2} y="145" textAnchor="middle" className="road-label">ผิวจราจรเดิม</text>
-        <text x={rightRoadStart + carriagePx - shoulderPx / 2} y="145" textAnchor="middle" className="road-label">งานขยาย</text>
-        <text x={center} y="107" textAnchor="middle" className="road-note">เสาไฟ 12.00 ม.</text>
-        <text x={center} y="171" textAnchor="middle" className="road-note">RS-608</text>
-        <text x="500" y="215" textAnchor="middle" className="ground-label">ระดับดินเดิม (EXISTING GROUND)</text>
+        <text x={center} y="107" textAnchor="middle" className="road-note">{section.barrier.code} · H {section.barrier.height.toFixed(2)} ม.</text>
+        <text x={x(geometry.leftEdge) + 25} y="214" className="slope-label">1:{section.left.sideSlope}</text>
+        <text x={x(geometry.rightEdge) - 45} y="214" className="slope-label">1:{section.right.sideSlope}</text>
+        <text x={x((geometry.leftEdge + geometry.medianStart) / 2)} y="132" textAnchor="middle" className="slope-green">{section.left.crossSlope.toFixed(1)}%</text>
+        <text x={x((geometry.medianEnd + geometry.rightEdge) / 2)} y="132" textAnchor="middle" className="slope-green">{section.right.crossSlope.toFixed(1)}%</text>
         <line x1="80" x2="920" y1="224" y2="224" stroke="#72787e" strokeDasharray="6 5" />
-        <text x="108" y="216" className="slope-label">1:{section.sideSlope}</text>
-        <text x="876" y="216" className="slope-label">1:{section.sideSlope}</text>
-        <text x={leftRoadStart + shoulderPx + lanePx / 2} y="132" textAnchor="middle" className="slope-green">{section.normalCrown.toFixed(1)}%</text>
-        <text x={rightRoadStart + lanePx / 2} y="132" textAnchor="middle" className="slope-green">{section.normalCrown.toFixed(1)}%</text>
+        <text x="500" y="242" textAnchor="middle" className="ground-label">ระดับดินเดิม (EXISTING GROUND)</text>
       </svg>
     </div>
   )
 }
 
+function SideEditor({
+  title,
+  side,
+  onChange,
+}: {
+  title: string
+  side: RoadSide
+  onChange: <K extends keyof RoadSide>(key: K, value: RoadSide[K]) => void
+}) {
+  const setLane = (index: number, value: number) => onChange('lanes', side.lanes.map((lane, laneIndex) => laneIndex === index ? value : lane))
+  const laneTotal = side.lanes.reduce((sum, width) => sum + width, 0)
+
+  return (
+    <section className="panel-box">
+      <div className="box-heading-row">
+        <h3>{title}</h3>
+        <div>
+          <button className="mini-btn" onClick={() => onChange('lanes', [...side.lanes, 3.5])}>+ เลน</button>
+          <button className="mini-btn" disabled={side.lanes.length <= 1} onClick={() => onChange('lanes', side.lanes.slice(0, -1))}>− เลน</button>
+        </div>
+      </div>
+      {side.lanes.map((lane, index) => <Field key={index} label={`เลน ${index + 1}`} value={lane} onChange={(value) => setLane(index, value)} />)}
+      <Field label="ไหล่ทางใน" value={side.insideShoulder} onChange={(value) => onChange('insideShoulder', value)} />
+      <Field label="ไหล่ทางนอก" value={side.outsideShoulder} onChange={(value) => onChange('outsideShoulder', value)} />
+      <Field label="Cross slope" value={side.crossSlope} suffix="%" onChange={(value) => onChange('crossSlope', value)} />
+      <Field label="ลาดข้าง m:1" value={side.sideSlope} suffix="" onChange={(value) => onChange('sideSlope', value)} />
+      <div className="lane-total"><span>รวมด้านนี้</span><strong>{(laneTotal + side.insideShoulder + side.outsideShoulder).toFixed(2)} ม.</strong></div>
+    </section>
+  )
+}
+
+function CoverageBadge({ analysis }: { analysis: ReturnType<typeof analyzeStationCoverage> }) {
+  if (analysis.status === 'complete') return <span className="coverage-badge ok">✓ Coverage ต่อเนื่อง</span>
+  if (analysis.status === 'empty') return <span className="coverage-badge neutral">ยังไม่มีช่วง STA</span>
+  const count = analysis.findings.length
+  return <span className={`coverage-badge ${analysis.status === 'invalid' ? 'bad' : 'warn'}`}>⚠ พบปัญหา {count} จุด</span>
+}
+
 function TypicalSectionModal({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<1 | 2>(1)
-  const [section, setSection] = useState(initialSection)
-  const [ranges, setRanges] = useState<StationRange[]>([
-    { id: 1, start: 31800, end: 35100 },
-    { id: 2, start: 35600, end: 38750 },
-  ])
+  const [section, setSection] = useState<CrossSectionModel>(() => createInitialSection())
+  const [ranges, setRanges] = useState<StationRange[]>(() => createInitialRanges())
+  const [selectedLayerId, setSelectedLayerId] = useState(DEFAULT_LAYERS[0].id)
 
-  const update = <K extends keyof CrossSectionState>(key: K, value: CrossSectionState[K]) => {
+  const geometry = useMemo(() => deriveSectionGeometry(section), [section])
+  const coverage = useMemo(() => analyzeStationCoverage(ranges), [ranges])
+  const quantities = useMemo(() => calculateQuantityProvenance(section, ranges, DEFAULT_LAYERS), [section, ranges])
+  const selectedQuantity = quantities.find((quantity) => quantity.layerId === selectedLayerId) ?? quantities[0]
+
+  const updateSection = <K extends keyof CrossSectionModel>(key: K, value: CrossSectionModel[K]) => {
     setSection((current) => ({ ...current, [key]: value }))
   }
 
-  const totalLength = ranges.reduce((sum, range) => sum + Math.max(0, range.end - range.start), 0)
-  const lanePerDirection = section.lanes.reduce((sum, lane) => sum + lane, 0)
-  const pavedWidth = lanePerDirection * 2 + section.outsideShoulder * 2 + section.insideShoulder * 2
+  const updateSide = <K extends keyof RoadSide>(sideKey: SideKey, key: K, value: RoadSide[K]) => {
+    setSection((current) => {
+      const next = { ...current, [sideKey]: { ...current[sideKey], [key]: value } }
+      return current.symmetric ? mirrorLeftToRight(sideKey === 'left' ? next : { ...next, left: next.right }) : next
+    })
+  }
 
-  const quantities = useMemo(() => {
-    const area = pavedWidth * totalLength
-    return layers.map((layer) => ({
-      ...layer,
-      quantity: layer.unit === 'm²' ? area : area * layer.thickness,
-    }))
-  }, [pavedWidth, totalLength])
+  const setSymmetric = (symmetric: boolean) => {
+    setSection((current) => symmetric ? mirrorLeftToRight({ ...current, symmetric: true }) : { ...current, symmetric: false })
+  }
 
-  const setLane = (index: number, value: number) => {
-    setSection((current) => ({ ...current, lanes: current.lanes.map((lane, i) => i === index ? value : lane) }))
+  const updateRange = (id: string, patch: Partial<StationRange>) => {
+    setRanges((current) => current.map((range) => range.id === id ? { ...range, ...patch } : range))
   }
 
   return (
     <div className="modal-backdrop">
       <div className={`tcs-modal ${step === 2 ? 'preview-mode' : ''}`}>
         <div className="modal-titlebar">
-          <strong>{step === 1 ? 'Typical Cross Section · แม่แบบรูปตัด' : 'แม่แบบรูปตัด'}</strong>
+          <strong>{step === 1 ? 'Typical Cross Section · Engineering Model' : 'ตรวจรูปตัด + Quantity Provenance'}</strong>
           <span className="section-code">{section.name}</span>
           <button className="icon-btn" onClick={onClose} aria-label="ปิด">×</button>
         </div>
@@ -185,108 +185,147 @@ function TypicalSectionModal({ onClose }: { onClose: () => void }) {
         {step === 1 ? (
           <>
             <div className="name-row">
-              <input value={section.name} onChange={(e) => update('name', e.target.value)} />
-              <button className="primary-outline" onClick={onClose}>✓ ตกลง</button>
-              <button className="ghost-button" onClick={onClose}>× ลบหน้าตัด</button>
+              <input value={section.name} onChange={(event) => updateSection('name', event.target.value)} />
+              <button className="primary-outline" onClick={() => setStep(2)}>✓ ตรวจผล</button>
+              <button className="ghost-button" onClick={onClose}>ยกเลิก</button>
             </div>
 
             <div className="editor-grid">
               <div className="editor-column">
                 <section className="panel-box">
-                  <h3>DOH Typical Section · แม่แบบมาตรฐาน ทล.</h3>
-                  <label className="select-row"><span>แบบ TCS</span><select defaultValue=""><option value="">— เลือกแบบ TCS แล้วใส่ระยะให้อัตโนมัติ —</option><option>TCS-01 ทาง 4 ช่องจราจร</option><option>TCS-02 ทาง 4 ช่องจราจรมีเกาะกลาง</option></select></label>
-                </section>
-
-                <section className="panel-box">
                   <h3>Key Dimensions · ระยะหลัก</h3>
-                  <Field label="เกาะกลาง" value={section.median} onChange={(v) => update('median', v)} />
-                  <Field label="ไหล่ทางใน (ฝั่งเกาะ)" value={section.insideShoulder} onChange={(v) => update('insideShoulder', v)} />
-                  <Field label="ไหล่ทางนอก" value={section.outsideShoulder} onChange={(v) => update('outsideShoulder', v)} />
-                  <Field label="ทางเท้า" value={section.sidewalk} onChange={(v) => update('sidewalk', v)} />
-                  <Field label="ทางเท้ายกสูง (คันหิน)" value={section.raisedMedian} onChange={(v) => update('raisedMedian', v)} />
-                  <Field label="ลาดข้าง m:1" value={section.sideSlope} suffix="" onChange={(v) => update('sideSlope', v)} />
-                  <Field label="เขต ROW" value={section.row} onChange={(v) => update('row', v)} />
-                  <Field label="เยื้อง ⊄ ROW (+ขวา)" value={section.rowSlope} onChange={(v) => update('rowSlope', v)} />
+                  <Field label="เกาะกลาง" value={section.median} onChange={(value) => updateSection('median', value)} />
+                  <Field label="ทางเท้า" value={section.sidewalk} onChange={(value) => updateSection('sidewalk', value)} />
+                  <Field label="เกาะยกสูง" value={section.raisedMedian} onChange={(value) => updateSection('raisedMedian', value)} />
+                  <Field label="เขต ROW" value={section.row} onChange={(value) => updateSection('row', value)} />
+                  <Field label="เยื้อง ROW (+ขวา)" value={section.rowOffset} onChange={(value) => updateSection('rowOffset', value)} />
+                  <label className="select-row"><span>รูปแบบหน้าตัด</span><select value={section.symmetric ? 'sym' : 'asym'} onChange={(event) => setSymmetric(event.target.value === 'sym')}><option value="sym">สมมาตร (ซ้าย = ขวา)</option><option value="asym">ไม่สมมาตร</option></select></label>
                 </section>
 
+                <SideEditor title="Left · องค์ประกอบฝั่งซ้าย" side={section.left} onChange={(key, value) => updateSide('left', key, value)} />
+                {!section.symmetric && <SideEditor title="Right · องค์ประกอบฝั่งขวา" side={section.right} onChange={(key, value) => updateSide('right', key, value)} />}
+
                 <section className="panel-box">
-                  <div className="box-heading-row">
-                    <h3>Lane Widths · ช่องจราจร/ทิศ (ในสุด → นอกสุด) · ม.</h3>
-                    <div><button className="mini-btn" onClick={() => setSection((c) => ({ ...c, lanes: [...c.lanes, 3.5] }))}>+ เลน</button><button className="mini-btn" disabled={section.lanes.length <= 1} onClick={() => setSection((c) => ({ ...c, lanes: c.lanes.slice(0, -1) }))}>− เลน</button></div>
+                  <h3>Geometry derived from components</h3>
+                  <div className="metric-grid">
+                    <span>ความกว้างก่อสร้าง</span><b>{geometry.totalWidth.toFixed(2)} ม.</b>
+                    <span>Effective paved width</span><b>{geometry.pavedWidth.toFixed(2)} ม.</b>
+                    <span>จำนวน component</span><b>{geometry.segments.length + 1}</b>
                   </div>
-                  {section.lanes.map((lane, index) => <Field key={index} label={`เลน${index + 1}`} value={lane} onChange={(v) => setLane(index, v)} />)}
-                  <div className="lane-total"><span>รวม</span><strong>{lanePerDirection.toFixed(2)} ม./ทิศ ({section.lanes.length} เลน)</strong></div>
                 </section>
-
-                <section className="panel-box">
-                  <h3>Median & Section Mode · ชนิดเกาะ / โหมดหน้าตัด</h3>
-                  <label className="select-row"><span>ชนิดเกาะกลาง</span><select value={section.medianType} onChange={(e) => update('medianType', e.target.value)}><option>เกาะแบริเออร์ คสล. (GD-106)</option><option>เกาะกลางแบบกด</option><option>เกาะกลางแบบยก</option></select></label>
-                  <label className="select-row"><span>รูปแบบโครงสร้าง</span><select value={section.structureMode} onChange={(e) => update('structureMode', e.target.value)}><option>ไม่มีเขตทาง — คันทาง + ลาดข้าง</option><option>มีเขตทางเต็มรูปแบบ</option></select></label>
-                  <label className="select-row"><span>ปูผิวทางถึงไหน</span><select value={section.surfaceMode} onChange={(e) => update('surfaceMode', e.target.value)}><option>ผิวจราจร + ไหล่ทาง (ค่าเดิม)</option><option>ผิวจราจรเท่านั้น</option></select></label>
-                  <label className="select-row"><span>รูปแบบหน้าตัด</span><select value={section.symmetric ? 'sym' : 'asym'} onChange={(e) => update('symmetric', e.target.value === 'sym')}><option value="sym">สมมาตร (ซ้าย = ขวา)</option><option value="asym">ไม่สมมาตร</option></select></label>
-                </section>
-
-                <section className="panel-box collapsed"><h3>Widening from Existing Road · ขยายจากถนนเดิม</h3><span>›</span></section>
               </div>
 
               <div className="editor-column">
-                <section className="panel-box">
-                  <h3>DOH Standard Drawings · แบบมาตรฐาน ทล. ที่อ้างอิง</h3>
-                  <div className="reference-list"><div><span>เรขาคณิตเกาะกลาง</span><b>GD-106</b></div><div><span>รางรับน้ำในเกาะ</span><b>DS-402</b></div><div><span>แบบเกี่ยวข้อง</span><b>GD-402</b></div></div>
+                <section className="panel-box live-panel">
+                  <h3>Live parametric section · สร้างจาก component geometry</h3>
+                  <CrossSectionGraphic section={section} />
                 </section>
 
                 <section className="panel-box">
-                  <h3>Median Barrier Device · แบบมาตรฐานที่ใช้แยกรายการจ่าย</h3>
-                  <label className="select-row full"><span>อ่านจากคอนกรีตในรูปตัด</span><select><option>ERB-401 · ราวกั้นอันตราย 2 หน้า (Double Faced Guard)</option></select></label>
-                  <p className="hint">แยกใบปริมาณตามรหัสนี้ → ราวกั้นอันตรายกับแบริเออร์ คสล. จะไม่ถูกรวมเป็นแถวเดียวอีก</p>
+                  <h3>DOH Standard References · object reference ไม่ใช่ข้อความกระจาย</h3>
+                  <div className="reference-list">
+                    {section.standards.map((standard) => <div key={standard.code}><span>{standard.title}</span><b>{standard.code}</b></div>)}
+                  </div>
                 </section>
 
                 <section className="panel-box">
                   <h3>Concrete Barrier · กำแพงคอนกรีตกั้นชน</h3>
-                  <label className="select-row"><span>แบบมาตรฐาน</span><select value={section.barrier} onChange={(e) => update('barrier', e.target.value)}><option>RS-608 · แบริเออร์ คสล. Type I (หล่อในที่)</option><option>RS-609 · แบริเออร์สำเร็จรูป</option></select></label>
-                  <div className="read-only-row"><span>ทรงหน้าตัด</span><strong>New Jersey · หล่อในที่</strong></div>
-                  <Field label="สูง" value={section.barrierHeight} onChange={(v) => update('barrierHeight', v)} />
-                  <Field label="กว้างฐาน" value={section.barrierBase} onChange={(v) => update('barrierBase', v)} />
-                  <p className="warning">△ สูง/กว้างฐานเป็นค่าตั้งต้นให้แก้ได้ — ต้องอ่านจากรูปตัดในแบบ RS-608 จริงก่อนใช้คิดปริมาณ</p>
+                  <div className="read-only-row"><span>แบบมาตรฐาน</span><strong>{section.barrier.code} · {section.barrier.label}</strong></div>
+                  <Field label="สูง" value={section.barrier.height} onChange={(value) => updateSection('barrier', { ...section.barrier, height: value })} />
+                  <Field label="กว้างฐาน" value={section.barrier.baseWidth} onChange={(value) => updateSection('barrier', { ...section.barrier, baseWidth: value })} />
+                  <p className="warning">ค่ามิตินี้ยังต้องตรวจเทียบแบบมาตรฐานฉบับที่ใช้งานจริงก่อนใช้ประมาณราคา production</p>
                 </section>
-
-                <section className="panel-box single-field"><Field label="เกาะยกสูง" value={section.raisedMedian} onChange={(v) => update('raisedMedian', v)} /></section>
 
                 <section className="panel-box">
-                  <h3>Superelevation · นโยบายหมุนรูปตัด</h3>
-                  <label className="select-row"><span>แหล่ง e / LT-RT / ช่วง STA</span><select value={section.superSource} onChange={(e) => update('superSource', e.target.value)}><option>Curve Data ตาม Alignment (e / LT-RT / STA)</option><option>กำหนดเองรายช่วง STA</option></select></label>
-                  <label className="select-row"><span>แกนหมุน / Pivot</span><select value={section.pivot} onChange={(e) => update('pivot', e.target.value)}><option>PG.(LT.) / PG.(RT.) แยกอิสระ (ตามแบบ 15–18)</option><option>Centerline</option></select></label>
-                  <label className="select-row"><span>ความลาดไหล่</span><select value={section.slopeDirection} onChange={(e) => update('slopeDirection', e.target.value)}><option>หมุนตามผิวจราจร</option><option>คงความลาดเดิม</option></select></label>
-                  <div className="read-only-row"><span>Normal Crown</span><strong>{section.normalCrown.toFixed(2)}% · อ่านจาก %ลาดผิวจราจร</strong></div>
+                  <h3>Superelevation ownership</h3>
+                  <div className="read-only-row"><span>แหล่ง e / LT-RT / STA</span><strong>{section.superelevation.source}</strong></div>
+                  <div className="read-only-row"><span>Pivot</span><strong>{section.superelevation.pivot}</strong></div>
+                  <div className="read-only-row"><span>Shoulder policy</span><strong>{section.superelevation.shoulderPolicy}</strong></div>
+                  <p className="hint">เก็บ ownership ไว้ใน model เพื่อไม่ให้กรอก e ซ้ำหลายจุด; calculation transition จะต่อใน phase ถัดไป</p>
                 </section>
-
-                <p className="footnote">Alignment เป็นเจ้าของ e, ทิศ LT/RT และ SE.ATTAINED/REMOVED · Profile เป็นเจ้าของ PG · รูปตัดนี้สร้าง PG.(LT.)/PG.(RT.) โดยไม่ให้กรอก e ซ้ำ</p>
               </div>
             </div>
           </>
         ) : (
           <div className="preview-page">
-            <div className="status-strip">▸ ชุดประกอบชั้นส่วน · {layers.length + 4} ชั้นปูพื้น + 2 ชั้นอื่นกับสถานี · คลุม {totalLength / 1000} กม. <b>ต่อเนื่อง ✓</b> · ยังไม่มีในโมเดล 4</div>
-            <div className="preview-toolbar"><strong>รูปตัดขวาง (หน้าตัดจริง)</strong><label>มาตราส่วนแนวตั้ง <select><option>1:1 ตรงแบบก่อสร้าง</option><option>1:2</option></select></label></div>
+            <div className="status-strip engineering-status">
+              <strong>Station Coverage Engine</strong>
+              <CoverageBadge analysis={coverage} />
+              <span>ครอบคลุมจริง {(coverage.coveredLength / 1000).toFixed(3)} กม.</span>
+              <span>Span {(coverage.spanLength / 1000).toFixed(3)} กม.</span>
+            </div>
+
+            {coverage.findings.length > 0 && (
+              <div className="coverage-findings">
+                {coverage.findings.map((finding) => (
+                  <div key={finding.id} className={`coverage-finding ${finding.type}`}>
+                    <b>{finding.type.toUpperCase()}</b>
+                    <span>{finding.message}</span>
+                    <em>{Math.max(0, finding.end - finding.start).toLocaleString()} ม.</em>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <CrossSectionGraphic section={section} />
-            <div className="legend-area">
-              <strong>ชั้นโครงสร้างทาง (บน → ล่าง)</strong>
-              <div className="legend-grid">{layers.map((layer, index) => <div className="legend-item" key={layer.name}><i style={{ background: layer.color }} /> <span>{index + 1}. {layer.name}</span><b>{layer.thickness.toFixed(2)} ม.</b></div>)}</div>
-            </div>
+
             <div className="range-editor">
-              <div className="range-header"><strong>📍 ใช้กับช่วง STA (เว้นช่วงได้)</strong><button className="mini-btn" onClick={() => setRanges((current) => [...current, { id: Date.now(), start: current.at(-1)?.end ?? 0, end: (current.at(-1)?.end ?? 0) + 1000 }])}>+ เพิ่มช่วง STA</button></div>
-              {ranges.map((range, index) => <div className="range-row" key={range.id}><span>ช่วงที่ {index + 1}</span><input type="number" value={range.start} onChange={(e) => setRanges((current) => current.map((r) => r.id === range.id ? { ...r, start: Number(e.target.value) } : r))} /><span>–</span><input type="number" value={range.end} onChange={(e) => setRanges((current) => current.map((r) => r.id === range.id ? { ...r, end: Number(e.target.value) } : r))} /><em>({formatStation(range.start)}–{formatStation(range.end)})</em><button className="remove-range" onClick={() => setRanges((current) => current.filter((r) => r.id !== range.id))}>×</button></div>)}
+              <div className="range-header"><strong>STA assignments · ระบบตรวจ gap / overlap / invalid อัตโนมัติ</strong><button className="mini-btn" onClick={() => {
+                const last = ranges.at(-1)
+                const start = last?.end ?? 0
+                setRanges((current) => [...current, { id: `range-${Date.now()}`, start, end: start + 1000, sectionId: section.id }])
+              }}>+ เพิ่มช่วง STA</button></div>
+              {ranges.map((range, index) => (
+                <div className="range-row" key={range.id}>
+                  <span>ช่วงที่ {index + 1}</span>
+                  <input type="number" value={range.start} onChange={(event) => updateRange(range.id, { start: Number(event.target.value) })} />
+                  <span>–</span>
+                  <input type="number" value={range.end} onChange={(event) => updateRange(range.id, { end: Number(event.target.value) })} />
+                  <em>({formatStation(range.start)}–{formatStation(range.end)})</em>
+                  <button className="remove-range" onClick={() => setRanges((current) => current.filter((item) => item.id !== range.id))}>×</button>
+                </div>
+              ))}
             </div>
-            <div className="quantity-summary"><strong>ประมาณปริมาณจากหน้าตัดนี้</strong><span>ความยาวรวม {totalLength.toLocaleString()} ม.</span><span>ความกว้างผิวทาง {pavedWidth.toFixed(2)} ม.</span><span>AC Wearing {quantities[0].quantity.toLocaleString(undefined, { maximumFractionDigits: 1 })} ม²</span><span>AC Binder {quantities[1].quantity.toLocaleString(undefined, { maximumFractionDigits: 1 })} ม³</span></div>
+
+            <section className="provenance-shell">
+              <div className="quantity-table">
+                <div className="quantity-table-head"><span>BOQ / Layer</span><span>Quantity</span><span>Unit</span></div>
+                {quantities.map((quantity) => (
+                  <button key={quantity.layerId} className={selectedLayerId === quantity.layerId ? 'active' : ''} onClick={() => setSelectedLayerId(quantity.layerId)}>
+                    <span>{quantity.name}</span>
+                    <b>{quantity.quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b>
+                    <em>{quantity.unit}</em>
+                  </button>
+                ))}
+              </div>
+
+              {selectedQuantity && (
+                <div className="provenance-card">
+                  <div className="provenance-title"><div><small>Quantity Provenance</small><h3>{selectedQuantity.name}</h3></div><strong>{selectedQuantity.quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })} {selectedQuantity.unit}</strong></div>
+                  <div className="formula-box"><span>Formula</span><code>{selectedQuantity.formula}</code></div>
+                  {selectedQuantity.standard && <div className="formula-box"><span>Reference</span><code>{selectedQuantity.standard}</code></div>}
+                  <div className="contribution-list">
+                    {selectedQuantity.contributions.map((contribution) => (
+                      <div key={contribution.rangeId}>
+                        <span>{contribution.label}</span>
+                        <small>{contribution.pavedWidth.toFixed(2)} ม. × {contribution.length.toLocaleString()} ม.</small>
+                        <b>{contribution.quantity.toLocaleString(undefined, { maximumFractionDigits: 2 })} {selectedQuantity.unit}</b>
+                      </div>
+                    ))}
+                  </div>
+                  {coverage.status !== 'complete' && <p className="provenance-warning">⚠ Quantity แสดงเพื่อ trace source แต่ต้องแก้ gap/overlap/invalid ก่อนถือเป็นปริมาณ final</p>}
+                </div>
+              )}
+            </section>
           </div>
         )}
 
         <div className="modal-footer">
           <button className="nav-button" onClick={() => step === 1 ? onClose() : setStep(1)}>← Back</button>
-          <button className="nav-button next" onClick={() => setStep(2)}>Next →</button>
-          <button className="apply-button">ใช้ค่า</button>
+          <button className="nav-button next" onClick={() => setStep(2)}>ตรวจผล →</button>
           <div className="footer-spacer" />
-          <button className="primary-outline" onClick={onClose}>✓ ตกลง</button>
+          <CoverageBadge analysis={coverage} />
+          <button className="primary-outline" disabled={coverage.status === 'invalid'} onClick={onClose}>✓ บันทึก Draft</button>
           <button className="ghost-button" onClick={onClose}>ยกเลิก</button>
         </div>
       </div>
@@ -297,6 +336,10 @@ function TypicalSectionModal({ onClose }: { onClose: () => void }) {
 function App() {
   const [modalOpen, setModalOpen] = useState(true)
   const [activeNav, setActiveNav] = useState('ใบ')
+  const overviewQuantities = useMemo(
+    () => calculateQuantityProvenance(initialSection, createInitialRanges(), DEFAULT_LAYERS),
+    [],
+  )
 
   return (
     <div className="app-shell">
@@ -313,16 +356,19 @@ function App() {
 
         <main className="main-content">
           <section className="boq-column">
-            <div className="page-heading"><div><span className="eyebrow">ปริมาณงาน</span><h1>BOQ หลัก 9.650 กม. <b>+0.550 กม. แยกเป็น</b></h1></div><div className="station-pill">STA 31+500.000 – 41+150.000</div></div>
-
+            <div className="page-heading"><div><span className="eyebrow">ปริมาณงาน · traceable model</span><h1>BOQ หลัก 9.650 กม. <b>Engineering Draft</b></h1></div><div className="station-pill">STA 31+500.000 – 41+150.000</div></div>
             <div className="scope-tabs"><button className="active">ทั้งโครงการ</button><button>ช่วงงานหลัก 31+500.000 – 41+150.000</button></div>
-            <div className="diagnostic"><strong>พิสูจน์แล้ว 0 / 28 บรรทัด</strong><span>ยังไม่ได้จัด</span><button onClick={() => setModalOpen(true)}>ดู/ตั้งแม่แบบรูปตัด</button></div>
+            <div className="diagnostic"><strong>Model-driven quantity</strong><span>ทุกตัวเลขย้อนกลับหา STA ได้</span><button onClick={() => setModalOpen(true)}>เปิด Typical Cross Section</button></div>
 
-            <article className="issue-card"><div className="issue-title"><span>▸</span><strong>ยังพิสูจน์ไม่ได้ 28 บรรทัด — ติดอะไรบ้าง</strong></div><div className="issue-sub">นอกขอบเขตการถอดปริมาณ 1 รายการ</div><div className="issue-sub highlighted">ชั้นออกแบบ · ประมาณการเบื้องต้น 3 รายการ</div></article>
+            <article className="issue-card">
+              <div className="issue-title"><span>▸</span><strong>Engineering checks</strong></div>
+              <div className="issue-sub highlighted">พบ STA gap ในตัวอย่างเริ่มต้น — ระบบจะไม่แสดงคำว่า “ต่อเนื่อง” แบบ hard-code อีก</div>
+              <div className="issue-sub">Superelevation transition และ authoritative DOH rate rules เป็น phase ถัดไป</div>
+            </article>
 
             <section className="boq-list">
-              <div className="boq-list-head"><span>รายการ</span><span>สถานะ</span><span>ปริมาณ</span></div>
-              {['ผิว AC Wearing หนา 0.05 ม. (พื้นที่)', 'ผิว AC Wearing (น้ำหนัก)', 'AC Binder / Leveling หนา 0.05 ม. (พื้นที่)', 'AC Binder / Leveling (น้ำหนัก)', 'AC Base หนา 0.08 ม. (พื้นที่)', 'AC Base (น้ำหนัก)', 'ผิวจราจรทางไหล่ทาง (พื้นที่)', 'Prime Coat', 'Tack Coat'].map((item, index) => <div className="boq-item" key={item}><span className="diamond">◆</span><span>{item}</span><span className={index < 3 ? 'state amber' : 'state'}>{index < 3 ? 'ยังไม่ผูกแบบ' : 'รอคำนวณ'}</span><b>{index < 3 ? '—' : '0.00'}</b></div>)}
+              <div className="boq-list-head"><span>รายการ</span><span>ที่มา</span><span>ปริมาณ</span></div>
+              {overviewQuantities.map((quantity) => <div className="boq-item" key={quantity.layerId}><span className="diamond">◆</span><span>{quantity.name}</span><span className="state">{quantity.contributions.length} STA ranges</span><b>{quantity.quantity.toLocaleString(undefined, { maximumFractionDigits: 1 })} {quantity.unit}</b></div>)}
             </section>
           </section>
 
@@ -331,15 +377,14 @@ function App() {
             <div className="fake-map">
               <div className="terrain t1" /><div className="terrain t2" /><div className="terrain t3" />
               <svg viewBox="0 0 300 720" preserveAspectRatio="none"><path d="M158 0 C118 80 186 145 144 224 C108 292 191 354 148 425 C112 486 181 554 137 720" fill="none" stroke="#e34b48" strokeWidth="4"/><path d="M154 0 C116 82 181 146 141 224 C109 292 185 354 145 425 C114 487 176 553 133 720" fill="none" stroke="#f6d4c4" strokeWidth="1.5" strokeDasharray="5 5"/></svg>
-              {[96, 175, 258, 344, 436, 526, 611].map((y, i) => <span key={y} className="station-tag" style={{ top: y, left: i % 2 ? 142 : 154 }}>{`STA ${32 + i}+${String((i * 117) % 1000).padStart(3, '0')}`}</span>)}
+              {[96, 175, 258, 344, 436, 526, 611].map((top, index) => <span key={top} className="station-tag" style={{ top, left: index % 2 ? 142 : 154 }}>{`STA ${32 + index}+${String((index * 117) % 1000).padStart(3, '0')}`}</span>)}
             </div>
             <div className="map-mini-preview"><CrossSectionGraphic section={initialSection} compact /></div>
           </aside>
         </main>
       </div>
 
-      <footer className="statusbar"><span>หมวด <b>งานทาง</b></span><span>STA 31+500.000 – 41+700.000</span><span>ชนิดงานในหมวดนี้ <b>56 ชนิด · 164 ช่อง</b></span><span>คลังแบบ ทล. <b>322 แบบ</b></span><span>ปริมาณ <b>28 บรรทัด</b></span><span>Factor F (1.499)</span><span className="grow" /><span>พิสูจน์เก็บก่อน 3 มิติ ◆ 0 △ 3</span></footer>
-
+      <footer className="statusbar"><span>หมวด <b>งานทาง</b></span><span>Architecture <b>model / geometry / station / quantity / UI</b></span><span>Validation <b>enabled</b></span><span className="grow" /><span>Draft quantity — ต้อง validate มาตรฐาน ทล. ก่อน production</span></footer>
       {modalOpen && <TypicalSectionModal onClose={() => setModalOpen(false)} />}
     </div>
   )
